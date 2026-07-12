@@ -1,0 +1,15 @@
+[
+  {
+    "EventID": 1,
+    "UtcTime": "2026-01-15 09:12:44.315",
+    "Computer": "WS-LAB-07.lab.local",
+    "User": "LAB\\analyst",
+    "Image": "C:\\Users\\analyst\\Downloads\\mimikatz.exe",
+    "OriginalFileName": "mimikatz.exe",
+    "CommandLine": "mimikatz.exe \"privilege::debug\" \"sekurlsa::logonpasswords\" exit",
+    "CurrentDirectory": "C:\\Users\\analyst\\Downloads\\",
+    "ParentImage": "C:\\Windows\\System32\\cmd.exe",
+    "ParentCommandLine": "\"C:\\Windows\\System32\\cmd.exe\"",
+    "IntegrityLevel": "High"
+  }
+]
