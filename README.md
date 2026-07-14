@@ -28,11 +28,26 @@ detection:
 Work in progress, built phase by phase.
 
 - [x] Phase 1: foundation (data model, safe rule loader, Sigma evaluator)
-- [ ] Phase 2: mutations
+- [x] Phase 2: mutations (7 behaviour-preserving attacker variations)
 - [ ] Phase 3: analysis
 - [ ] Phase 4: improvement and verification
 - [ ] Phase 5: report and export
 - [ ] Phase 6: demo and docs
+
+## Mutations
+
+Each mutation keeps the attacker's behaviour and changes one detail they control.
+Every mutation is a pure, deterministic function: the original event is never modified.
+
+| Mutation | What changes |
+| --- | --- |
+| `rename_image` | Executable renamed (`OriginalFileName` still shows the real tool) |
+| `change_path` | Same executable run from another folder |
+| `change_case` | Mixed upper/lower case in file name and command line |
+| `reorder_args` | Leading switches in a different order |
+| `encode_cmdline` | PowerShell plain command vs `-EncodedCommand` |
+| `add_noise_args` | A harmless extra switch (`-NoLogo`, `/d`) |
+| `alt_parent` | A different parent process |
 
 ## Install and test
 
