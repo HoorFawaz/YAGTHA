@@ -29,10 +29,37 @@ Work in progress, built phase by phase.
 
 - [x] Phase 1: foundation (data model, safe rule loader, Sigma evaluator)
 - [x] Phase 2: mutations (7 behaviour-preserving attacker variations)
-- [ ] Phase 3: analysis
+- [x] Phase 3: analysis (`yagtha analyze`)
 - [ ] Phase 4: improvement and verification
 - [ ] Phase 5: report and export
 - [ ] Phase 6: demo and docs
+
+## Usage
+
+```bash
+yagtha analyze --rule data/rules/mimikatz.yml
+```
+
+Real output:
+
+```text
+Rule: Mimikatz Execution by Image Name (high)
+Baseline events: 1 (1 detected)
+Variants tested: 4 | caught: 3 | evaded: 1
+
+  caught   alt_parent
+  caught   change_case
+  caught   change_path
+  EVADED   rename_image
+           [confirmed] selection: Image|endswith '\mimikatz.exe' no longer matches: Image changed from 'C:\Users\analyst\Downloads\mimikatz.exe' to 'C:\Users\analyst\Downloads\update.exe'
+           still visible in: OriginalFileName, CommandLine
+```
+
+`confirmed` means YAGTHA put the field's original value back and the rule fired again,
+so the cause is reproduced. `likely` means more than one changed field is involved.
+
+Other options: `--events my_events.json`, `--mutations rename_image,change_path`,
+`--json`, and `yagtha list-mutations`.
 
 ## Mutations
 

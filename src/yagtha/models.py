@@ -114,12 +114,53 @@ class Confidence(StrEnum):
 
 @dataclass(frozen=True)
 class Finding:
-    """Why one variant evaded the rule."""
+    """Why one variant evaded the rule.
+
+    ``condition`` is the selection that stopped matching, ``remaining_signals``
+    the fields that still carry the malicious behaviour in the variant, and
+    ``event_index`` the baseline event the variant came from.
+    """
 
     mutation_name: str
     field: str
     reason: str
     confidence: Confidence
+    condition: str = ""
+    remaining_signals: tuple[str, ...] = ()
+    event_index: int = 0
+
+
+@dataclass(frozen=True)
+class Outcome:
+    """One evaluated variant and the baseline event it came from.
+
+    ``evaded`` is True only when the rule caught the baseline but missed
+    this mutated variant.
+    """
+
+    event_index: int
+    result: EvalResult
+    evaded: bool = False
+
+
+@dataclass(frozen=True)
+class Analysis:
+    """Result of running one rule against baseline events and their variants."""
+
+    rule: Rule
+    outcomes: tuple[Outcome, ...]
+    findings: tuple[Finding, ...]
+    undetected_baselines: tuple[int, ...] = ()
+
+    @property
+    def variants(self) -> tuple[Outcome, ...]:
+        """Outcomes of mutated variants (baselines left out)."""
+        return tuple(o for o in self.outcomes if o.result.variant.mutation_name != "original")
+
+    @property
+    def evaded(self) -> tuple[Outcome, ...]:
+        """Mutated variants that evaded the rule."""
+        return tuple(o for o in self.outcomes if o.evaded)
 
 
 @dataclass(frozen=True)

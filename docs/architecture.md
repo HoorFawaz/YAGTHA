@@ -17,9 +17,9 @@ baseline events ──> mutations ──> variants ──> evaluator ──> ana
 | `condition.py` (condition parser, used by the loader and the evaluator) | 1 | Done |
 | `evaluator.py` | 1 | Done |
 | `mutations/` (registry, process, PowerShell, command-line helpers) | 2 | Done |
-| `analyzer.py` | 3 | Planned |
+| `events.py`, `analyzer.py`, `cli.py` (`analyze`, `list-mutations`) | 3 | Done |
 | `improver.py`, `verifier.py` | 4 | Planned |
-| `reporter.py`, `exporter.py`, `cli.py` | 5 | Planned |
+| `reporter.py`, `exporter.py`, `cli.py` (`run`) | 5 | Planned |
 | `llm/` (optional) | 7 | Planned |
 
 This document is completed in Phase 6.

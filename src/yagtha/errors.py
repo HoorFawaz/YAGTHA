@@ -27,3 +27,7 @@ class UnsupportedRuleFeatureError(YagthaError):
 
 class RuleEvaluationError(YagthaError):
     """A rule could not be evaluated safely on an event (for example a regex timeout)."""
+
+
+class EventValidationError(YagthaError):
+    """An events file is missing, too large, or not a list of flat JSON objects."""
