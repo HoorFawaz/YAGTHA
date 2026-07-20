@@ -165,8 +165,75 @@ class Analysis:
 
 @dataclass(frozen=True)
 class Improvement:
-    """A proposed, more robust rule and the reasoning behind it."""
+    """A proposed, more robust rule and the reasoning behind it.
+
+    ``changes`` lists what was added, ``unresolved`` the evasions YAGTHA
+    could not fix from the evidence in the events, and ``yaml_text`` the
+    improved rule as Sigma YAML (empty when nothing changed).
+    """
 
     new_rule: Rule
     changes: tuple[str, ...]
     rationale: str
+    unresolved: tuple[str, ...] = ()
+    yaml_text: str = ""
+
+    @property
+    def changed(self) -> bool:
+        """True when a new rule was proposed."""
+        return bool(self.changes)
+
+
+class Expected(StrEnum):
+    """What a regression case expects the rule to do."""
+
+    MATCH = "match"
+    NO_MATCH = "no_match"
+
+
+@dataclass(frozen=True)
+class RegressionCase:
+    """One event and whether the rule must fire on it."""
+
+    name: str
+    expected: Expected
+    event: Event
+
+
+@dataclass(frozen=True)
+class Verification:
+    """Side-by-side test of the original and the improved rule.
+
+    ``benign_hits_*`` are the indexes of benign events each rule fires on,
+    ``regressions`` the malicious events or variants the original caught but
+    the improved rule misses.
+    """
+
+    original: Analysis
+    improved: Analysis
+    benign_total: int
+    benign_hits_original: tuple[int, ...]
+    benign_hits_improved: tuple[int, ...]
+    regressions: tuple[str, ...]
+
+    @property
+    def new_false_positives(self) -> tuple[int, ...]:
+        """Benign events only the improved rule fires on."""
+        before = set(self.benign_hits_original)
+        return tuple(i for i in self.benign_hits_improved if i not in before)
+
+    @property
+    def fixed(self) -> tuple[str, ...]:
+        """Evasions of the original rule that the improved rule catches."""
+        still = {_key(o) for o in self.improved.evaded}
+        return tuple(_key(o) for o in self.original.evaded if _key(o) not in still)
+
+    @property
+    def passed(self) -> bool:
+        """No regression and no new false positive."""
+        return not self.regressions and not self.new_false_positives
+
+
+def _key(outcome: Outcome) -> str:
+    """Stable label of a variant: ``event<index>/<mutation>``."""
+    return f"event{outcome.event_index}/{outcome.result.variant.mutation_name}"

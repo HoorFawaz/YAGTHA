@@ -1,0 +1,100 @@
+[
+  {
+    "Image": "C:\\Windows\\System32\\notepad.exe",
+    "OriginalFileName": "NOTEPAD.EXE",
+    "CommandLine": "notepad.exe C:\\Users\\analyst\\Documents\\mimikatz_detection_notes.txt",
+    "ParentImage": "C:\\Windows\\explorer.exe",
+    "User": "LAB\\analyst"
+  },
+  {
+    "Image": "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
+    "OriginalFileName": "chrome.exe",
+    "CommandLine": "\"C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe\" --profile-directory=Default",
+    "ParentImage": "C:\\Windows\\explorer.exe",
+    "User": "LAB\\analyst"
+  },
+  {
+    "Image": "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
+    "OriginalFileName": "PowerShell.EXE",
+    "CommandLine": "powershell.exe -NoProfile -Command \"Get-ChildItem C:\\Reports\"",
+    "ParentImage": "C:\\Windows\\explorer.exe",
+    "User": "LAB\\analyst"
+  },
+  {
+    "Image": "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
+    "OriginalFileName": "PowerShell.EXE",
+    "CommandLine": "powershell.exe -ExecutionPolicy Bypass -File C:\\IT\\Scripts\\backup.ps1",
+    "ParentImage": "C:\\Windows\\System32\\svchost.exe",
+    "User": "LAB\\svc_backup"
+  },
+  {
+    "Image": "C:\\Windows\\System32\\cmd.exe",
+    "OriginalFileName": "Cmd.Exe",
+    "CommandLine": "cmd.exe /c dir C:\\Users\\analyst",
+    "ParentImage": "C:\\Windows\\explorer.exe",
+    "User": "LAB\\analyst"
+  },
+  {
+    "Image": "C:\\Windows\\System32\\certutil.exe",
+    "OriginalFileName": "CertUtil.exe",
+    "CommandLine": "certutil.exe -hashfile C:\\Downloads\\installer.msi SHA256",
+    "ParentImage": "C:\\Windows\\System32\\cmd.exe",
+    "User": "LAB\\analyst"
+  },
+  {
+    "Image": "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe",
+    "OriginalFileName": "msedge.exe",
+    "CommandLine": "\"C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe\"",
+    "ParentImage": "C:\\Windows\\explorer.exe",
+    "User": "LAB\\analyst"
+  },
+  {
+    "Image": "C:\\Windows\\System32\\svchost.exe",
+    "OriginalFileName": "svchost.exe",
+    "CommandLine": "C:\\Windows\\system32\\svchost.exe -k netsvcs -p",
+    "ParentImage": "C:\\Windows\\System32\\services.exe",
+    "User": "NT AUTHORITY\\SYSTEM"
+  },
+  {
+    "Image": "C:\\Windows\\System32\\taskmgr.exe",
+    "OriginalFileName": "Taskmgr.exe",
+    "CommandLine": "\"C:\\Windows\\system32\\taskmgr.exe\" /4",
+    "ParentImage": "C:\\Windows\\explorer.exe",
+    "User": "LAB\\analyst"
+  },
+  {
+    "Image": "C:\\Users\\analyst\\AppData\\Local\\Programs\\Microsoft VS Code\\Code.exe",
+    "OriginalFileName": "Code.exe",
+    "CommandLine": "\"Code.exe\" C:\\Projects\\yagtha",
+    "ParentImage": "C:\\Windows\\explorer.exe",
+    "User": "LAB\\analyst"
+  },
+  {
+    "Image": "C:\\Windows\\System32\\whoami.exe",
+    "OriginalFileName": "whoami.exe",
+    "CommandLine": "whoami.exe /all",
+    "ParentImage": "C:\\Windows\\System32\\cmd.exe",
+    "User": "LAB\\helpdesk"
+  },
+  {
+    "Image": "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
+    "OriginalFileName": "PowerShell.EXE",
+    "CommandLine": "powershell.exe -NoLogo -NonInteractive -Command \"Get-Service | Where-Object Status -eq Running\"",
+    "ParentImage": "C:\\Windows\\System32\\cmd.exe",
+    "User": "LAB\\helpdesk"
+  },
+  {
+    "Image": "C:\\ProgramData\\Updater\\update.exe",
+    "OriginalFileName": "VendorUpdate.exe",
+    "CommandLine": "update.exe /silent",
+    "ParentImage": "C:\\Windows\\System32\\svchost.exe",
+    "User": "NT AUTHORITY\\SYSTEM"
+  },
+  {
+    "Image": "C:\\Windows\\System32\\rundll32.exe",
+    "OriginalFileName": "RUNDLL32.EXE",
+    "CommandLine": "rundll32.exe C:\\Windows\\system32\\shell32.dll,Control_RunDLL",
+    "ParentImage": "C:\\Windows\\explorer.exe",
+    "User": "LAB\\analyst"
+  }
+]

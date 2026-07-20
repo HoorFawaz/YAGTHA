@@ -30,7 +30,7 @@ Work in progress, built phase by phase.
 - [x] Phase 1: foundation (data model, safe rule loader, Sigma evaluator)
 - [x] Phase 2: mutations (7 behaviour-preserving attacker variations)
 - [x] Phase 3: analysis (`yagtha analyze`)
-- [ ] Phase 4: improvement and verification
+- [x] Phase 4: improvement and verification (`yagtha improve`)
 - [ ] Phase 5: report and export
 - [ ] Phase 6: demo and docs
 
@@ -60,6 +60,65 @@ so the cause is reproduced. `likely` means more than one changed field is involv
 
 Other options: `--events my_events.json`, `--mutations rename_image,change_path`,
 `--json`, and `yagtha list-mutations`.
+
+### Improve and verify
+
+```bash
+yagtha improve --rule data/rules/mimikatz.yml
+```
+
+Real output:
+
+```text
+Rule: Mimikatz Execution by Image Name (high)
+Original rule: 1 of 4 variants evade it
+
+Proposed changes:
+  - added 'yagtha_original_file_name': OriginalFileName is ['mimikatz.exe'] (survives rename_image)
+  - added 'yagtha_command_line': CommandLine contains all of ['privilege::debug', 'sekurlsa::logonpasswords'] (survives rename_image)
+
+Improved rule:
+
+title: Mimikatz Execution by Image Name (improved by YAGTHA)
+id: 09d45394-2e6f-5b6a-a757-458fac4539c4
+status: experimental
+description: Derived by YAGTHA from rule 6a1f3c52-2b7e-4d8a-9c41-0e5b7f2d9a13. Adds selections on evidence
+  that stayed the same in the variants that evaded the original rule.
+author: Hoor Fawaz
+logsource:
+  category: process_creation
+  product: windows
+detection:
+  selection:
+    Image|endswith: \mimikatz.exe
+  yagtha_original_file_name:
+    OriginalFileName:
+    - mimikatz.exe
+  yagtha_command_line:
+    CommandLine|contains|all:
+    - privilege::debug
+    - sekurlsa::logonpasswords
+  condition: (selection) or (yagtha_original_file_name or yagtha_command_line)
+level: high
+related:
+- id: 6a1f3c52-2b7e-4d8a-9c41-0e5b7f2d9a13
+  type: derived
+
+Verification:
+  variants evading: 1 -> 0
+    fixed      event0/rename_image
+  regressions: none
+  benign events matched: 0 -> 0 (of 14)
+  regression cases: 19 (5 match, 14 no_match)
+
+Result: PASSED
+```
+
+YAGTHA only adds values it found in the events, never guessed ones. The improved
+rule is checked on all variants again and on normal activity
+(`data/benign_events/benign.json`): it passes only if nothing the original caught
+is lost and no new benign event triggers it. What it gets right is kept as
+regression cases. Options: `--events`, `--benign`, `--mutations`, `--json`.
 
 ## Mutations
 

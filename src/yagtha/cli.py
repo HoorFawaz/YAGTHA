@@ -3,9 +3,10 @@
 Commands:
 
 * ``yagtha analyze --rule RULE [--events EVENTS] [--mutations a,b] [--json]``
+* ``yagtha improve --rule RULE [--events EVENTS] [--benign BENIGN] [--mutations a,b] [--json]``
 * ``yagtha list-mutations``
 
-``improve`` and ``run`` arrive in later phases.
+``run`` (analysis, improvement and an exported report in one go) arrives in Phase 5.
 """
 
 from __future__ import annotations
@@ -21,9 +22,11 @@ from yagtha import __version__
 from yagtha.analyzer import analyze
 from yagtha.errors import YagthaError
 from yagtha.events import load_events
-from yagtha.models import Analysis
+from yagtha.improver import improve
+from yagtha.models import Analysis, Improvement, RegressionCase, Verification
 from yagtha.mutations import list_mutations
 from yagtha.rule_loader import load_rule
+from yagtha.verifier import build_regression_cases, verify
 
 EXIT_OK = 0
 EXIT_ERROR = 2
@@ -48,6 +51,23 @@ def build_parser() -> argparse.ArgumentParser:
     analyze_cmd.add_argument("--mutations", help="comma-separated mutation names (default: all)")
     analyze_cmd.add_argument("--json", action="store_true", help="print the result as JSON")
 
+    improve_cmd = commands.add_parser(
+        "improve", help="propose a more robust rule and verify it on benign events"
+    )
+    improve_cmd.add_argument("--rule", required=True, type=Path, help="Sigma rule (YAML)")
+    improve_cmd.add_argument(
+        "--events",
+        type=Path,
+        help="baseline events (JSON); default: data/malicious_events/<rule name>.json",
+    )
+    improve_cmd.add_argument(
+        "--benign",
+        type=Path,
+        help="normal activity events (JSON); default: data/benign_events/benign.json",
+    )
+    improve_cmd.add_argument("--mutations", help="comma-separated mutation names (default: all)")
+    improve_cmd.add_argument("--json", action="store_true", help="print the result as JSON")
+
     commands.add_parser("list-mutations", help="list the available mutations")
     return parser
 
@@ -59,6 +79,8 @@ def main(argv: Sequence[str] | None = None, out: TextIO | None = None) -> int:
     try:
         if args.command == "list-mutations":
             _print_mutations(stream)
+        elif args.command == "improve":
+            _run_improve(args, stream)
         else:
             _run_analyze(args, stream)
     except YagthaError as exc:
@@ -72,18 +94,125 @@ def default_events_path(rule_path: Path) -> Path:
     return rule_path.resolve().parent.parent / "malicious_events" / f"{rule_path.stem}.json"
 
 
+def default_benign_path(rule_path: Path) -> Path:
+    """Built-in benign corpus next to the sample rules: ``../benign_events/benign.json``."""
+    return rule_path.resolve().parent.parent / "benign_events" / "benign.json"
+
+
+def _mutation_names(args: argparse.Namespace) -> list[str] | None:
+    if not args.mutations:
+        return None
+    return [name.strip() for name in args.mutations.split(",") if name.strip()]
+
+
 def _run_analyze(args: argparse.Namespace, stream: TextIO) -> None:
     rule = load_rule(args.rule)
     events = load_events(args.events or default_events_path(args.rule))
-    names = None
-    if args.mutations:
-        names = [name.strip() for name in args.mutations.split(",") if name.strip()]
-    analysis = analyze(rule, events, names)
+    analysis = analyze(rule, events, _mutation_names(args))
     if args.json:
         json.dump(analysis_to_dict(analysis), stream, indent=2)
         stream.write("\n")
     else:
         stream.write(format_analysis(analysis))
+
+
+def _run_improve(args: argparse.Namespace, stream: TextIO) -> None:
+    rule = load_rule(args.rule)
+    events = load_events(args.events or default_events_path(args.rule))
+    benign_path = args.benign or default_benign_path(args.rule)
+    if args.benign is None and not benign_path.is_file():
+        print(
+            "yagtha: warning: no benign events found, false positives are not checked",
+            file=sys.stderr,
+        )
+        benign = []
+    else:
+        benign = load_events(benign_path)
+    names = _mutation_names(args)
+    analysis = analyze(rule, events, names)
+    improvement = improve(rule, analysis, events)
+    verification = verify(rule, improvement.new_rule, events, benign, names)
+    cases = build_regression_cases(verification, benign) if improvement.changed else ()
+    if args.json:
+        json.dump(improvement_to_dict(improvement, verification, cases), stream, indent=2)
+        stream.write("\n")
+    else:
+        stream.write(format_improvement(improvement, verification, cases))
+
+
+def format_improvement(
+    improvement: Improvement, verification: Verification, cases: Sequence[RegressionCase]
+) -> str:
+    """Human-readable improvement and verification summary."""
+    before, after = verification.original, verification.improved
+    lines = [
+        f"Rule: {before.rule.title} ({before.rule.level})",
+        f"Original rule: {len(before.evaded)} of {len(before.variants)} variants evade it",
+        "",
+    ]
+    if not improvement.changed:
+        lines.append(improvement.rationale)
+    else:
+        lines.append("Proposed changes:")
+        lines.extend(f"  - {change}" for change in improvement.changes)
+    if improvement.unresolved:
+        lines.append("")
+        lines.append("Not fixed automatically:")
+        lines.extend(f"  - {note}" for note in improvement.unresolved)
+    if not improvement.changed:
+        return "\n".join(lines) + "\n"
+    lines += ["", "Improved rule:", "", improvement.yaml_text.rstrip(), "", "Verification:"]
+    lines.append(f"  variants evading: {len(before.evaded)} -> {len(after.evaded)}")
+    for key in verification.fixed:
+        lines.append(f"    fixed      {key}")
+    for outcome in after.evaded:
+        lines.append(
+            f"    still evades event{outcome.event_index}/{outcome.result.variant.mutation_name}"
+        )
+    lines.append(f"  regressions: {', '.join(verification.regressions) or 'none'}")
+    lines.append(
+        f"  benign events matched: {len(verification.benign_hits_original)} -> "
+        f"{len(verification.benign_hits_improved)} (of {verification.benign_total})"
+    )
+    for index in verification.new_false_positives:
+        lines.append(f"    new false positive: benign event {index}")
+    matching = sum(1 for case in cases if case.expected.value == "match")
+    lines.append(
+        f"  regression cases: {len(cases)} ({matching} match, {len(cases) - matching} no_match)"
+    )
+    lines.append("")
+    lines.append(f"Result: {'PASSED' if verification.passed else 'FAILED'}")
+    return "\n".join(lines) + "\n"
+
+
+def improvement_to_dict(
+    improvement: Improvement, verification: Verification, cases: Sequence[RegressionCase]
+) -> dict[str, Any]:
+    """JSON-friendly view of an improvement and its verification."""
+    return {
+        "rule": {"id": verification.original.rule.id, "title": verification.original.rule.title},
+        "changed": improvement.changed,
+        "changes": list(improvement.changes),
+        "unresolved": list(improvement.unresolved),
+        "rationale": improvement.rationale,
+        "improved_rule": {
+            "id": improvement.new_rule.id,
+            "title": improvement.new_rule.title,
+            "yaml": improvement.yaml_text,
+        },
+        "verification": {
+            "passed": verification.passed,
+            "evaded_before": len(verification.original.evaded),
+            "evaded_after": len(verification.improved.evaded),
+            "fixed": list(verification.fixed),
+            "regressions": list(verification.regressions),
+            "benign_total": verification.benign_total,
+            "benign_hits_original": list(verification.benign_hits_original),
+            "benign_hits_improved": list(verification.benign_hits_improved),
+            "new_false_positives": list(verification.new_false_positives),
+        },
+        "regression_cases": len(cases),
+    }
 
 
 def _print_mutations(stream: TextIO) -> None:
