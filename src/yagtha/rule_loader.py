@@ -40,6 +40,11 @@ _MATCH_MODIFIERS = frozenset(
 
 def load_rule(path: str | Path) -> Rule:
     """Read and parse a Sigma rule file."""
+    return parse_rule(read_rule_text(path))
+
+
+def read_rule_text(path: str | Path) -> str:
+    """Read a rule file as text, with the same size limit as ``load_rule``."""
     file_path = Path(path)
     try:
         size = file_path.stat().st_size
@@ -51,7 +56,7 @@ def load_rule(path: str | Path) -> Rule:
         text = file_path.read_text(encoding="utf-8")
     except (OSError, UnicodeDecodeError) as exc:
         raise RuleParseError(f"cannot read rule file {file_path}: {exc}") from exc
-    return parse_rule(text)
+    return text
 
 
 def parse_rule(text: str) -> Rule:

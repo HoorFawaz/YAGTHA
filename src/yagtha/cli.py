@@ -4,9 +4,12 @@ Commands:
 
 * ``yagtha analyze --rule RULE [--events EVENTS] [--mutations a,b] [--json]``
 * ``yagtha improve --rule RULE [--events EVENTS] [--benign BENIGN] [--mutations a,b] [--json]``
+* ``yagtha run --rule RULE [--events EVENTS] [--benign BENIGN] [--mutations a,b] [--out output/]``
 * ``yagtha list-mutations``
 
-``run`` (analysis, improvement and an exported report in one go) arrives in Phase 5.
+``run`` does analysis, improvement and verification in one go and exports the
+bundle (rules, regression tests, report) to ``output/<rule name>/``. It exits
+with 1 when the improved rule fails verification.
 """
 
 from __future__ import annotations
@@ -18,17 +21,19 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import Any, TextIO
 
-from yagtha import __version__
+from yagtha import __version__, exporter
 from yagtha.analyzer import analyze
 from yagtha.errors import YagthaError
-from yagtha.events import load_events
+from yagtha.events import EventDict, load_events
 from yagtha.improver import improve
-from yagtha.models import Analysis, Improvement, RegressionCase, Verification
+from yagtha.models import Analysis, Improvement, RegressionCase, Rule, Verification
 from yagtha.mutations import list_mutations
-from yagtha.rule_loader import load_rule
-from yagtha.verifier import build_regression_cases, verify
+from yagtha.reporter import Verdict, render_report, verdict
+from yagtha.rule_loader import load_rule, parse_rule, read_rule_text
+from yagtha.verifier import build_regression_cases, cases_to_dict, verify
 
 EXIT_OK = 0
+EXIT_FAILED = 1
 EXIT_ERROR = 2
 
 
@@ -54,22 +59,37 @@ def build_parser() -> argparse.ArgumentParser:
     improve_cmd = commands.add_parser(
         "improve", help="propose a more robust rule and verify it on benign events"
     )
-    improve_cmd.add_argument("--rule", required=True, type=Path, help="Sigma rule (YAML)")
-    improve_cmd.add_argument(
+    _add_pipeline_arguments(improve_cmd)
+    improve_cmd.add_argument("--json", action="store_true", help="print the result as JSON")
+
+    run_cmd = commands.add_parser(
+        "run", help="analyze, improve, verify and export the bundle with the report"
+    )
+    _add_pipeline_arguments(run_cmd)
+    run_cmd.add_argument(
+        "--out",
+        type=Path,
+        default=exporter.DEFAULT_ROOT,
+        help="output folder, must be inside ./output (default: output/)",
+    )
+
+    commands.add_parser("list-mutations", help="list the available mutations")
+    return parser
+
+
+def _add_pipeline_arguments(command: argparse.ArgumentParser) -> None:
+    command.add_argument("--rule", required=True, type=Path, help="Sigma rule (YAML)")
+    command.add_argument(
         "--events",
         type=Path,
         help="baseline events (JSON); default: data/malicious_events/<rule name>.json",
     )
-    improve_cmd.add_argument(
+    command.add_argument(
         "--benign",
         type=Path,
         help="normal activity events (JSON); default: data/benign_events/benign.json",
     )
-    improve_cmd.add_argument("--mutations", help="comma-separated mutation names (default: all)")
-    improve_cmd.add_argument("--json", action="store_true", help="print the result as JSON")
-
-    commands.add_parser("list-mutations", help="list the available mutations")
-    return parser
+    command.add_argument("--mutations", help="comma-separated mutation names (default: all)")
 
 
 def main(argv: Sequence[str] | None = None, out: TextIO | None = None) -> int:
@@ -81,6 +101,8 @@ def main(argv: Sequence[str] | None = None, out: TextIO | None = None) -> int:
             _print_mutations(stream)
         elif args.command == "improve":
             _run_improve(args, stream)
+        elif args.command == "run":
+            return _run_pipeline(args, stream)
         else:
             _run_analyze(args, stream)
     except YagthaError as exc:
@@ -116,28 +138,87 @@ def _run_analyze(args: argparse.Namespace, stream: TextIO) -> None:
         stream.write(format_analysis(analysis))
 
 
-def _run_improve(args: argparse.Namespace, stream: TextIO) -> None:
-    rule = load_rule(args.rule)
-    events = load_events(args.events or default_events_path(args.rule))
+def _load_benign(args: argparse.Namespace) -> list[EventDict]:
     benign_path = args.benign or default_benign_path(args.rule)
     if args.benign is None and not benign_path.is_file():
         print(
             "yagtha: warning: no benign events found, false positives are not checked",
             file=sys.stderr,
         )
-        benign = []
-    else:
-        benign = load_events(benign_path)
+        return []
+    return load_events(benign_path)
+
+
+def _improve_and_verify(
+    args: argparse.Namespace, rule: Rule
+) -> tuple[Improvement, Verification, tuple[RegressionCase, ...]]:
+    events = load_events(args.events or default_events_path(args.rule))
+    benign = _load_benign(args)
     names = _mutation_names(args)
     analysis = analyze(rule, events, names)
     improvement = improve(rule, analysis, events)
     verification = verify(rule, improvement.new_rule, events, benign, names)
     cases = build_regression_cases(verification, benign) if improvement.changed else ()
+    return improvement, verification, cases
+
+
+def _run_improve(args: argparse.Namespace, stream: TextIO) -> None:
+    improvement, verification, cases = _improve_and_verify(args, load_rule(args.rule))
     if args.json:
         json.dump(improvement_to_dict(improvement, verification, cases), stream, indent=2)
         stream.write("\n")
     else:
         stream.write(format_improvement(improvement, verification, cases))
+
+
+def _run_pipeline(args: argparse.Namespace, stream: TextIO) -> int:
+    out = exporter.resolve_output_dir(args.out)
+    rule_text = read_rule_text(args.rule)
+    rule = parse_rule(rule_text)
+    improvement, verification, cases = _improve_and_verify(args, rule)
+    files = {
+        exporter.ORIGINAL_RULE: rule_text,
+        exporter.ANALYSIS: json.dumps(
+            improvement_to_dict(improvement, verification, cases), indent=2
+        )
+        + "\n",
+    }
+    if improvement.changed:
+        files[exporter.IMPROVED_RULE] = improvement.yaml_text
+        files[exporter.REGRESSION_CASES] = (
+            json.dumps(cases_to_dict(improvement.new_rule, cases), indent=2) + "\n"
+        )
+        files[exporter.REGRESSION_TEST] = exporter.REGRESSION_TEST_SOURCE
+    names = [name for name in exporter.BUNDLE_FILES if name in files or name == exporter.REPORT]
+    files[exporter.REPORT] = render_report(improvement, verification, cases, names)
+    bundle = exporter.write_bundle(out, exporter.bundle_name(args.rule), files)
+    result = verdict(improvement, verification)
+    before, after = verification.original, verification.improved
+    stream.write(f"Rule: {rule.title} ({rule.level})\n")
+    stream.write(f"Variants evading: {len(before.evaded)} of {len(before.variants)}")
+    if improvement.changed:
+        stream.write(f" -> {len(after.evaded)} with the improved rule")
+    stream.write("\n")
+    stream.write(
+        f"Benign events matched: {len(verification.benign_hits_original)}"
+        + (f" -> {len(verification.benign_hits_improved)}" if improvement.changed else "")
+        + f" (of {verification.benign_total})\n"
+    )
+    for note in improvement.unresolved:
+        stream.write(f"Not fixed: {note}\n")
+    stream.write(f"Verdict: {result.value}\n")
+    stream.write(f"Bundle: {_display(bundle)}\n")
+    for name in names:
+        stream.write(f"  {name}\n")
+    return EXIT_FAILED if result is Verdict.FAILED else EXIT_OK
+
+
+def _display(path: Path) -> str:
+    """Path relative to the current folder when possible, with forward slashes."""
+    try:
+        return path.relative_to(Path.cwd().resolve()).as_posix() + "/"
+    except ValueError:
+        return path.as_posix() + "/"
 
 
 def format_improvement(

@@ -9,7 +9,14 @@ from pathlib import Path
 
 import pytest
 
-from yagtha.cli import EXIT_ERROR, EXIT_OK, default_benign_path, default_events_path, main
+from yagtha.cli import (
+    EXIT_ERROR,
+    EXIT_FAILED,
+    EXIT_OK,
+    default_benign_path,
+    default_events_path,
+    main,
+)
 
 DATA = Path(__file__).resolve().parent.parent / "data"
 RULE = DATA / "rules" / "mimikatz.yml"
@@ -141,3 +148,76 @@ def test_improve_warns_without_benign_corpus(
 def test_improve_missing_explicit_benign_is_an_error(tmp_path: Path) -> None:
     code, _ = run("improve", "--rule", str(RULE), "--benign", str(tmp_path / "none.json"))
     assert code == EXIT_ERROR
+
+
+def bundle_files(path: Path) -> list[str]:
+    return sorted(p.name for p in path.iterdir())
+
+
+def test_run_exports_bundle(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    code, text = run("run", "--rule", str(RULE), "--out", "output/")
+    assert code == EXIT_OK
+    assert "Variants evading: 1 of 4 -> 0 with the improved rule" in text
+    assert "Verdict: PASSED" in text
+    assert "Bundle: output/mimikatz/" in text
+    bundle = tmp_path / "output" / "mimikatz"
+    assert bundle_files(bundle) == [
+        "analysis.json",
+        "improved_rule.yml",
+        "original_rule.yml",
+        "regression_cases.json",
+        "report.md",
+        "test_regression.py",
+    ]
+    assert (bundle / "original_rule.yml").read_text("utf-8") == RULE.read_text("utf-8")
+    assert json.loads((bundle / "analysis.json").read_text("utf-8"))["verification"]["passed"]
+    cases = json.loads((bundle / "regression_cases.json").read_text("utf-8"))
+    assert len(cases["cases"]) == 19
+    assert "**Verdict: PASSED.**" in (bundle / "report.md").read_text("utf-8")
+
+
+def test_generated_regression_tests_pass(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    assert run("run", "--rule", str(RULE))[0] == EXIT_OK
+    bundle = tmp_path / "output" / "mimikatz"
+    assert pytest.main(["-q", "-p", "no:cacheprovider", str(bundle / "test_regression.py")]) == 0
+
+
+def test_run_insufficient_evidence(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    events = tmp_path / "events.json"
+    events.write_text(json.dumps([{"Image": "C:\\Tools\\mimikatz.exe"}]), encoding="utf-8")
+    code, text = run("run", "--rule", str(RULE), "--events", str(events))
+    assert code == EXIT_OK
+    assert "Verdict: INSUFFICIENT EVIDENCE" in text
+    assert "Not fixed: rename_image: insufficient evidence" in text
+    assert bundle_files(tmp_path / "output" / "mimikatz") == [
+        "analysis.json",
+        "original_rule.yml",
+        "report.md",
+    ]
+
+
+def test_run_failed_verification_exits_1(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    benign = tmp_path / "benign.json"
+    benign.write_text(
+        json.dumps([{"Image": "C:\\Tools\\other.exe", "OriginalFileName": "mimikatz.exe"}]),
+        encoding="utf-8",
+    )
+    code, text = run("run", "--rule", str(RULE), "--benign", str(benign))
+    assert code == EXIT_FAILED
+    assert "Benign events matched: 0 -> 1 (of 1)" in text
+    assert "Verdict: FAILED" in text
+
+
+def test_run_refuses_output_outside_output_folder(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    for out in ("..", "elsewhere", str(tmp_path.parent)):
+        code, _ = run("run", "--rule", str(RULE), "--out", out)
+        assert code == EXIT_ERROR
+        assert "must be inside output/" in capsys.readouterr().err
+    assert not (tmp_path / "elsewhere").exists()

@@ -31,3 +31,7 @@ class RuleEvaluationError(YagthaError):
 
 class EventValidationError(YagthaError):
     """An events file is missing, too large, or not a list of flat JSON objects."""
+
+
+class ExportError(YagthaError):
+    """The export bundle cannot be written safely (for example a path outside output/)."""

@@ -14,13 +14,15 @@ expected verdict) that can be saved and re-checked after every rule change.
 
 from __future__ import annotations
 
+import json
 from collections.abc import Iterable, Mapping, Sequence
+from pathlib import Path
 from typing import Any
 
 from yagtha.analyzer import analyze
 from yagtha.errors import EventValidationError
 from yagtha.evaluator import matches
-from yagtha.events import validate_events
+from yagtha.events import MAX_EVENTS_BYTES, validate_events
 from yagtha.models import Event, Expected, RegressionCase, Rule, Verification
 from yagtha.mutations import MAX_VARIANTS
 
@@ -133,3 +135,17 @@ def cases_from_dict(data: Any) -> tuple[RegressionCase, ...]:
         (event,) = validate_events([item.get("event")])
         cases.append(RegressionCase(name=name, expected=verdict, event=event))
     return tuple(cases)
+
+
+def load_cases(path: str | Path) -> tuple[RegressionCase, ...]:
+    """Read a regression file written by the exporter."""
+    file_path = Path(path)
+    try:
+        if file_path.stat().st_size > MAX_EVENTS_BYTES:
+            raise EventValidationError(
+                f"regression file {file_path} is larger than {MAX_EVENTS_BYTES} bytes"
+            )
+        data = json.loads(file_path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise EventValidationError(f"cannot read regression file {file_path}: {exc}") from exc
+    return cases_from_dict(data)

@@ -106,8 +106,8 @@ def test_exact_image_rule_gets_image_name_and_rename_is_unresolved() -> None:
     assert moved is not None
     assert matches(improvement.new_rule, moved)
     assert improvement.unresolved == (
-        "rename_image: no unchanged field shows the behaviour, so there is no safe value "
-        "to match on",
+        "rename_image: insufficient evidence, no unchanged field shows the behaviour, "
+        "so there is no safe value to match on",
     )
 
 
@@ -123,7 +123,7 @@ def test_only_unresolved_evasions_give_no_change() -> None:
     analysis = analyze(rule, [event], ["rename_image"])
     improvement = improve(rule, analysis, [event])
     assert not improvement.changed
-    assert "No automatic fix" in improvement.rationale
+    assert "Insufficient evidence" in improvement.rationale
     assert len(improvement.unresolved) == 1
 
 

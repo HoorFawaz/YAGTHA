@@ -58,14 +58,14 @@ def improve(rule: Rule, analysis: Analysis, events: Sequence[Event]) -> Improvem
             )
         elif not _propose(finding, events, detected, proposals):
             unresolved.append(
-                f"{finding.mutation_name}: no unchanged field shows the behaviour, "
-                "so there is no safe value to match on"
+                f"{finding.mutation_name}: insufficient evidence, no unchanged field "
+                "shows the behaviour, so there is no safe value to match on"
             )
     if not proposals:
         rationale = (
             "No evasion found, the rule is unchanged."
             if not analysis.findings
-            else "No automatic fix: no field in the events still shows the behaviour."
+            else "Insufficient evidence: no field in the events still shows the behaviour."
         )
         return Improvement(
             new_rule=rule, changes=(), rationale=rationale, unresolved=tuple(_unique(unresolved))

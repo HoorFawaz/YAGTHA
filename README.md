@@ -31,7 +31,7 @@ Work in progress, built phase by phase.
 - [x] Phase 2: mutations (7 behaviour-preserving attacker variations)
 - [x] Phase 3: analysis (`yagtha analyze`)
 - [x] Phase 4: improvement and verification (`yagtha improve`)
-- [ ] Phase 5: report and export
+- [x] Phase 5: report and export (`yagtha run`)
 - [ ] Phase 6: demo and docs
 
 ## Usage
@@ -119,6 +119,35 @@ rule is checked on all variants again and on normal activity
 (`data/benign_events/benign.json`): it passes only if nothing the original caught
 is lost and no new benign event triggers it. What it gets right is kept as
 regression cases. Options: `--events`, `--benign`, `--mutations`, `--json`.
+
+### Full pipeline and export
+
+```bash
+yagtha run --rule data/rules/mimikatz.yml --out output/
+```
+
+Real output:
+
+```text
+Rule: Mimikatz Execution by Image Name (high)
+Variants evading: 1 of 4 -> 0 with the improved rule
+Benign events matched: 0 -> 0 (of 14)
+Verdict: PASSED
+Bundle: output/mimikatz/
+  original_rule.yml
+  improved_rule.yml
+  regression_cases.json
+  test_regression.py
+  analysis.json
+  report.md
+```
+
+The bundle holds the original and improved rules, the regression cases, a
+ready-to-run `test_regression.py` (run `pytest` inside the bundle folder), the
+full result as JSON and a Markdown `report.md`. The verdict is one of `ROBUST`,
+`PASSED`, `FAILED`, `INSUFFICIENT EVIDENCE` (variants evade but the events hold no
+safe value to fix it with) or `NOT DETECTED`. `run` exits with 1 when the verdict
+is `FAILED`, so it can gate a CI job. Bundles are only written inside `output/`.
 
 ## Mutations
 
