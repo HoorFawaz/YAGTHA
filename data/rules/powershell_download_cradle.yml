@@ -1,0 +1,17 @@
+title: PowerShell Download Cradle
+id: 3c9e7a14-58b2-4f6d-a0e1-7d2b9c4f8a65
+status: experimental
+description: >
+  Detects PowerShell downloading and running a script in memory with
+  Net.WebClient DownloadString. Relies on the executable name and on the
+  plain-text command line.
+author: Hoor Fawaz
+logsource:
+  category: process_creation
+  product: windows
+detection:
+  selection:
+    Image|endswith: '\powershell.exe'
+    CommandLine|contains: 'DownloadString'
+  condition: selection
+level: high

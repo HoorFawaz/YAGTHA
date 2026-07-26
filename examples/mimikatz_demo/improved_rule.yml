@@ -1,0 +1,22 @@
+title: Mimikatz Execution by Image Name (improved by YAGTHA)
+id: 90df4039-c4ab-5cbe-902b-1633e58a89a0
+status: experimental
+description: Derived by YAGTHA from rule 6a1f3c52-2b7e-4d8a-9c41-0e5b7f2d9a13. Each defeated field can
+  also be matched by evidence that stayed the same in the variants that evaded the original rule.
+author: Hoor Fawaz
+logsource:
+  category: process_creation
+  product: windows
+detection:
+  selection:
+    Image|endswith: \mimikatz.exe
+  yagtha_selection:
+  - OriginalFileName: mimikatz.exe
+  - CommandLine|contains|all:
+    - privilege::debug
+    - sekurlsa::logonpasswords
+  condition: selection or yagtha_selection
+level: high
+related:
+- id: 6a1f3c52-2b7e-4d8a-9c41-0e5b7f2d9a13
+  type: derived

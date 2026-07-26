@@ -134,6 +134,11 @@ def _parse_condition_value(value: Any) -> str:
     raise RuleValidationError("detection 'condition' must be a non-empty string")
 
 
+def parse_selection(name: str, value: Any) -> Selection:
+    """Parse and validate one selection (a map, or a list of maps)."""
+    return _parse_selection(name, value)
+
+
 def _parse_selection(name: str, value: Any) -> Selection:
     """Parse one named selection (a map, or a list of maps)."""
     if not _SELECTION_NAME_RE.match(name):

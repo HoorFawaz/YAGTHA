@@ -1,0 +1,15 @@
+[
+  {
+    "EventID": 1,
+    "UtcTime": "2026-01-15 11:20:07.442",
+    "Computer": "WS-LAB-07.lab.local",
+    "User": "LAB\\analyst",
+    "Image": "C:\\Windows\\System32\\whoami.exe",
+    "OriginalFileName": "whoami.exe",
+    "CommandLine": "whoami.exe /all",
+    "CurrentDirectory": "C:\\Users\\analyst\\",
+    "ParentImage": "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
+    "ParentCommandLine": "powershell.exe -NoProfile",
+    "IntegrityLevel": "Medium"
+  }
+]

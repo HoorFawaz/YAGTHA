@@ -1,0 +1,15 @@
+title: Mimikatz Execution by Image Name
+id: 6a1f3c52-2b7e-4d8a-9c41-0e5b7f2d9a13
+status: experimental
+description: >
+  Detects mimikatz by its executable name only. This rule is fragile on
+  purpose: it is the main demo of how a simple rename evades a detection.
+author: Hoor Fawaz
+logsource:
+  category: process_creation
+  product: windows
+detection:
+  selection:
+    Image|endswith: '\mimikatz.exe'
+  condition: selection
+level: high

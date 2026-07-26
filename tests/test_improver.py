@@ -5,8 +5,9 @@ from __future__ import annotations
 from typing import Any
 
 from yagtha.analyzer import analyze
+from yagtha.condition import parse_condition
 from yagtha.evaluator import matches
-from yagtha.improver import escape_value, filter_names, improve, significant_arguments
+from yagtha.improver import escape_value, improve, render_condition, significant_arguments
 from yagtha.models import Rule
 from yagtha.mutations import get_mutation
 from yagtha.rule_loader import parse_rule
@@ -34,15 +35,66 @@ def test_mimikatz_rule_gets_original_file_name_and_command_line(
     assert improvement.changed
     assert improvement.unresolved == ()
     new = improvement.new_rule
-    assert set(new.selections) == {"selection", "yagtha_original_file_name", "yagtha_command_line"}
-    assert new.condition == "(selection) or (yagtha_original_file_name or yagtha_command_line)"
+    assert list(new.selections) == ["selection", "yagtha_selection"]
+    assert new.condition == "selection or yagtha_selection"
+    added = new.raw["detection"]["yagtha_selection"]
+    assert added == [
+        {"OriginalFileName": "mimikatz.exe"},
+        {"CommandLine|contains|all": ["privilege::debug", "sekurlsa::logonpasswords"]},
+    ]
     assert new.title.endswith("(improved by YAGTHA)")
     assert new.raw["related"] == [{"id": mimikatz_rule.id, "type": "derived"}]
     renamed = get_mutation("rename_image").apply(mimikatz_event)
     assert renamed is not None
     assert not matches(mimikatz_rule, renamed)
     assert matches(new, renamed)
-    assert "privilege::debug" in improvement.yaml_text
+
+
+def test_other_fields_of_the_selection_are_kept() -> None:
+    event = {
+        "Image": "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
+        "OriginalFileName": "PowerShell.EXE",
+        "CommandLine": "powershell.exe -Command DownloadString",
+    }
+    rule = make_rule(
+        """
+  selection:
+    Image|endswith: '\\powershell.exe'
+    CommandLine|contains: 'DownloadString'
+  condition: selection
+"""
+    )
+    analysis = analyze(rule, [event], ["rename_image"])
+    improvement = improve(rule, analysis, [event])
+    assert improvement.new_rule.raw["detection"]["yagtha_selection"][0] == {
+        "CommandLine|contains": "DownloadString",
+        "OriginalFileName": "PowerShell.EXE",
+    }
+    other = {"OriginalFileName": "PowerShell.EXE", "CommandLine": "powershell.exe Get-Date"}
+    assert not matches(improvement.new_rule, other)
+
+
+def test_encoded_command_is_insufficient_evidence() -> None:
+    event = {
+        "Image": "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
+        "OriginalFileName": "PowerShell.EXE",
+        "CommandLine": "powershell.exe -Command DownloadString",
+    }
+    rule = make_rule(
+        """
+  selection:
+    Image|endswith: '\\powershell.exe'
+    CommandLine|contains: 'DownloadString'
+  condition: selection
+"""
+    )
+    analysis = analyze(rule, [event], ["encode_cmdline"])
+    improvement = improve(rule, analysis, [event])
+    assert not improvement.changed
+    assert improvement.unresolved == (
+        "encode_cmdline: insufficient evidence, no unchanged field can replace CommandLine "
+        "in 'selection'",
+    )
 
 
 def test_improvement_is_deterministic_and_reparses(
@@ -81,8 +133,9 @@ def test_filters_are_kept_and_filter_evasion_is_unresolved(
     )
     analysis = analyze(rule, [mimikatz_event], ["rename_image", "alt_parent"])
     improvement = improve(rule, analysis, [mimikatz_event])
-    assert "and not filter_explorer" in improvement.new_rule.condition
-    assert any("kept the filters" in change for change in improvement.changes)
+    assert improvement.new_rule.condition == (
+        "(selection or yagtha_selection) and not filter_explorer"
+    )
     assert len(improvement.unresolved) == 1
     assert "alt_parent: filter 'filter_explorer'" in improvement.unresolved[0]
     moved = get_mutation("alt_parent").apply(mimikatz_event)
@@ -101,13 +154,14 @@ def test_exact_image_rule_gets_image_name_and_rename_is_unresolved() -> None:
     )
     analysis = analyze(rule, [event], ["change_path", "rename_image"])
     improvement = improve(rule, analysis, [event])
-    assert set(improvement.new_rule.selections) == {"selection", "yagtha_image_name"}
+    assert improvement.new_rule.raw["detection"]["yagtha_selection"] == {
+        "Image|endswith": "\\mimikatz.exe"
+    }
     moved = get_mutation("change_path").apply(event)
     assert moved is not None
     assert matches(improvement.new_rule, moved)
     assert improvement.unresolved == (
-        "rename_image: insufficient evidence, no unchanged field shows the behaviour, "
-        "so there is no safe value to match on",
+        "rename_image: insufficient evidence, no unchanged field can replace Image in 'selection'",
     )
 
 
@@ -143,15 +197,17 @@ def test_selection_names_do_not_collide(mimikatz_event: dict[str, Any]) -> None:
         """
   selection:
     Image|endswith: '\\mimikatz.exe'
-  yagtha_original_file_name:
+  yagtha_selection:
     User: 'nobody'
-  condition: selection or yagtha_original_file_name
+  condition: selection or yagtha_selection
 """
     )
     analysis = analyze(rule, [mimikatz_event], ["rename_image"])
     improvement = improve(rule, analysis, [mimikatz_event])
-    assert "yagtha_original_file_name_2" in improvement.new_rule.selections
-    assert improvement.new_rule.selections["yagtha_original_file_name"].fields == ("User",)
+    assert improvement.new_rule.condition == (
+        "(selection or yagtha_selection_2) or yagtha_selection"
+    )
+    assert improvement.new_rule.selections["yagtha_selection"].fields == ("User",)
 
 
 def test_significant_arguments() -> None:
@@ -174,26 +230,15 @@ def test_escape_value() -> None:
     assert escape_value("two\\\\") == "two\\\\\\"
 
 
-def test_filter_names() -> None:
-    rule = make_rule(
-        """
-  selection:
-    Image|endswith: '\\a.exe'
-  filter_one:
-    User: 'x'
-  filter_two:
-    User: 'y'
-  condition: selection and not (filter_one or filter_two) and not not selection
-"""
-    )
-    assert filter_names(rule) == ("filter_one", "filter_two")
-    of_rule = make_rule(
-        """
-  selection:
-    Image|endswith: '\\a.exe'
-  filter_one:
-    User: 'x'
-  condition: selection and not 1 of filter_*
-"""
-    )
-    assert filter_names(of_rule) == ("filter_one",)
+def test_render_condition() -> None:
+    names = ["sel_a", "sel_b", "filter_x"]
+    cases = {
+        "sel_a": "(sel_a or y_a)",
+        "sel_a and not filter_x": "(sel_a or y_a) and not filter_x",
+        "1 of sel_* and not filter_x": "((sel_a or y_a) or sel_b) and not filter_x",
+        "all of sel_*": "((sel_a or y_a) and sel_b)",
+        "not (sel_b or filter_x) or sel_a": "not (sel_b or filter_x) or (sel_a or y_a)",
+        "1 of filter_*": "filter_x",
+    }
+    for text, expected in cases.items():
+        assert render_condition(parse_condition(text, names), {"sel_a": "y_a"}) == expected

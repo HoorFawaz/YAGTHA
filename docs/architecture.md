@@ -20,18 +20,22 @@ baseline events ──> mutations ──> variants ──> evaluator ──> ana
 | `events.py`, `analyzer.py`, `cli.py` (`analyze`, `list-mutations`) | 3 | Done |
 | `improver.py`, `verifier.py`, `cli.py` (`improve`), `data/benign_events/` | 4 | Done |
 | `reporter.py`, `exporter.py`, `cli.py` (`run`) | 5 | Done |
-| `llm/` (optional) | 7 | Planned |
+| Sample rules, `examples/mimikatz_demo`, docs, screenshots | 6 | Done |
+| `llm/`, Streamlit UI (optional) | 7 | Not included |
 
 ## Improvement and verification (Phase 4)
 
-- The improver only copies values from baseline events the original rule
-  detects, and only from fields the analyzer found unchanged in an evading
-  variant (`OriginalFileName`, significant `CommandLine` arguments, the
-  executable name when only its folder moved). Copied values have Sigma
-  wildcards escaped.
-- New selections are named `yagtha_*`, OR-ed with the original condition,
-  and keep every `not` filter of the original rule. Evasions caused by a
-  filter, or with nothing left to match on, are listed as not fixed.
+- For each evasion the improver takes the field that stopped matching in one
+  selection and tries to replace only that field with evidence copied from the
+  same baseline event: `OriginalFileName` or the executable name for a defeated
+  `Image`, and distinctive arguments (`CommandLine|contains|all`) for a defeated
+  `Image` or `CommandLine`. Every other field of the selection is kept.
+- A replacement is kept only if it matches both the baseline and the evading
+  variant. Replacements go into `yagtha_<selection>`, and the condition is
+  rewritten from its syntax tree so `<selection>` becomes
+  `(<selection> or yagtha_<selection>)`; filters are untouched.
+- Evasions caused by a filter, or with nothing safe to match on, are reported
+  as not fixed (insufficient evidence). Copied values have Sigma wildcards escaped.
 - The improved rule is written with `yaml.safe_dump`, then parsed again with
   the normal loader, so it is checked like any input rule. It gets a
   deterministic id and `related: derived` pointing to the original.
@@ -54,4 +58,11 @@ baseline events ──> mutations ──> variants ──> evaluator ──> ana
   symbolic links. `test_regression.py` is a static file with no value copied
   from the input.
 
-This document is completed in Phase 6.
+## Demo and docs (Phase 6)
+
+- Four sample rules in `data/rules/`, each with synthetic baseline events in
+  `data/malicious_events/`, share the benign corpus. `yagtha run --rule
+  data/rules/` runs them all, and CI runs it on every push.
+- `examples/mimikatz_demo/` is a committed bundle. `tests/test_samples.py`
+  regenerates it and fails if it differs, so the README and demo always show
+  real output.

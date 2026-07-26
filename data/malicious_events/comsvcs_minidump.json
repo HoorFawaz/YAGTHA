@@ -1,0 +1,15 @@
+[
+  {
+    "EventID": 1,
+    "UtcTime": "2026-01-15 10:41:55.870",
+    "Computer": "WS-LAB-07.lab.local",
+    "User": "LAB\\analyst",
+    "Image": "C:\\Windows\\System32\\rundll32.exe",
+    "OriginalFileName": "RUNDLL32.EXE",
+    "CommandLine": "rundll32.exe C:\\Windows\\System32\\comsvcs.dll, MiniDump 724 C:\\Users\\Public\\lsass.dmp full",
+    "CurrentDirectory": "C:\\Windows\\System32\\",
+    "ParentImage": "C:\\Windows\\System32\\cmd.exe",
+    "ParentCommandLine": "\"C:\\Windows\\System32\\cmd.exe\"",
+    "IntegrityLevel": "High"
+  }
+]

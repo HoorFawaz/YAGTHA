@@ -4,12 +4,14 @@ Commands:
 
 * ``yagtha analyze --rule RULE [--events EVENTS] [--mutations a,b] [--json]``
 * ``yagtha improve --rule RULE [--events EVENTS] [--benign BENIGN] [--mutations a,b] [--json]``
-* ``yagtha run --rule RULE [--events EVENTS] [--benign BENIGN] [--mutations a,b] [--out output/]``
+* ``yagtha run --rule RULE_OR_FOLDER [--events EVENTS] [--benign BENIGN] [--mutations a,b]
+  [--out output/]``
 * ``yagtha list-mutations``
 
 ``run`` does analysis, improvement and verification in one go and exports the
-bundle (rules, regression tests, report) to ``output/<rule name>/``. It exits
-with 1 when the improved rule fails verification.
+bundle (rules, regression tests, report) to ``output/<rule name>/``. Given a
+folder, it runs every ``*.yml`` rule in it. It exits with 1 when an improved
+rule fails verification.
 """
 
 from __future__ import annotations
@@ -35,6 +37,7 @@ from yagtha.verifier import build_regression_cases, cases_to_dict, verify
 EXIT_OK = 0
 EXIT_FAILED = 1
 EXIT_ERROR = 2
+MAX_RULES_PER_RUN = 100
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -78,7 +81,9 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def _add_pipeline_arguments(command: argparse.ArgumentParser) -> None:
-    command.add_argument("--rule", required=True, type=Path, help="Sigma rule (YAML)")
+    command.add_argument(
+        "--rule", required=True, type=Path, help="Sigma rule (YAML), or a folder of rules for run"
+    )
     command.add_argument(
         "--events",
         type=Path,
@@ -102,7 +107,7 @@ def main(argv: Sequence[str] | None = None, out: TextIO | None = None) -> int:
         elif args.command == "improve":
             _run_improve(args, stream)
         elif args.command == "run":
-            return _run_pipeline(args, stream)
+            return _run_command(args, stream)
         else:
             _run_analyze(args, stream)
     except YagthaError as exc:
@@ -171,7 +176,34 @@ def _run_improve(args: argparse.Namespace, stream: TextIO) -> None:
         stream.write(format_improvement(improvement, verification, cases))
 
 
-def _run_pipeline(args: argparse.Namespace, stream: TextIO) -> int:
+def _run_command(args: argparse.Namespace, stream: TextIO) -> int:
+    """``run`` on one rule file, or on every rule of a folder."""
+    if not args.rule.is_dir():
+        return _run_pipeline(args, stream)
+    if args.events is not None:
+        raise YagthaError("--events cannot be used with a folder of rules")
+    rules = sorted(args.rule.glob("*.yml"))
+    if not rules:
+        raise YagthaError(f"no .yml rules found in {args.rule}")
+    if len(rules) > MAX_RULES_PER_RUN:
+        raise YagthaError(f"more than {MAX_RULES_PER_RUN} rules in {args.rule}")
+    verdicts: list[str] = []
+    code = EXIT_OK
+    for path in rules:
+        stream.write(f"== {path.name}\n")
+        rule_args = argparse.Namespace(**{**vars(args), "rule": path})
+        result = _run_pipeline(rule_args, stream, verdicts)
+        code = max(code, result)
+        stream.write("\n")
+    counts = {name: verdicts.count(name) for name in dict.fromkeys(verdicts)}
+    summary = ", ".join(f"{count} {name}" for name, count in counts.items())
+    stream.write(f"Rules: {len(rules)} | {summary}\n")
+    return code
+
+
+def _run_pipeline(
+    args: argparse.Namespace, stream: TextIO, verdicts: list[str] | None = None
+) -> int:
     out = exporter.resolve_output_dir(args.out)
     rule_text = read_rule_text(args.rule)
     rule = parse_rule(rule_text)
@@ -193,6 +225,8 @@ def _run_pipeline(args: argparse.Namespace, stream: TextIO) -> int:
     files[exporter.REPORT] = render_report(improvement, verification, cases, names)
     bundle = exporter.write_bundle(out, exporter.bundle_name(args.rule), files)
     result = verdict(improvement, verification)
+    if verdicts is not None:
+        verdicts.append(result.value)
     before, after = verification.original, verification.improved
     stream.write(f"Rule: {rule.title} ({rule.level})\n")
     stream.write(f"Variants evading: {len(before.evaded)} of {len(before.variants)}")

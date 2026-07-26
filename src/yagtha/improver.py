@@ -1,38 +1,38 @@
 """Propose a more robust rule using only evidence found in the events.
 
-The improver never invents values. Every value it adds is copied from a
-baseline event the original rule already detects, and only from a field
-the analyzer reported as still carrying the behaviour after a mutation.
+The improver never invents values. For each evasion it takes the part of
+the rule that stopped matching (one field of one selection) and tries to
+replace only that field with evidence copied from the baseline event:
 
-Heuristics, applied to each evasion:
+* ``Image`` defeated (renamed or moved executable):
+  ``OriginalFileName`` from the PE header, the executable's file name
+  (``Image|endswith '\\<name>'``), or the significant command-line arguments;
+* ``CommandLine`` defeated (reordered, extra switches, renamed executable):
+  the significant arguments with ``CommandLine|contains|all``.
 
-* the executable was renamed or moved but ``OriginalFileName`` (taken
-  from the PE header) is unchanged: match on ``OriginalFileName``;
-* the command-line arguments are unchanged: match on the significant
-  arguments with ``CommandLine|contains|all`` (order and case free);
-* only the folder of the executable changed: match on
-  ``Image|endswith '\\<name>'``.
-
-New selections are OR-ed with the original condition and keep every filter
-(``not ...``) of the original rule, so a filter still suppresses them.
-Evasions caused by a filter, or with no remaining signal, are reported as
-unresolved instead of being guessed.
+Every other field of that selection is kept, so the rule stays as specific
+as before. A replacement is kept only if it matches both the baseline and
+the evading variant. Replacements go into a new selection
+``yagtha_<selection>``, and the condition uses ``(<selection> or
+yagtha_<selection>)`` wherever it used ``<selection>``; filters and the rest
+of the condition do not change. Evasions caused by a filter, or with no
+evidence left to match on, are reported as unresolved instead of guessed.
 """
 
 from __future__ import annotations
 
 import copy
 import uuid
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from typing import Any
 
 import yaml
 
-from yagtha.condition import Node, Not, Of, Ref, parse_condition
+from yagtha.condition import And, Node, Not, Of, Or, Ref, parse_condition
 from yagtha.evaluator import match_selection
-from yagtha.models import Analysis, Event, Finding, Improvement, Rule
+from yagtha.models import Analysis, Event, FieldCondition, Finding, Improvement, Rule, Selection
 from yagtha.mutations.cmdline import basename, is_flag, split_args
-from yagtha.rule_loader import parse_rule
+from yagtha.rule_loader import parse_rule, parse_selection
 
 PREFIX = "yagtha_"
 MAX_TOKENS = 4
@@ -41,25 +41,25 @@ MIN_PLAIN_TOKEN_LENGTH = 8
 # Fixed namespace so the same improvement always gets the same rule id.
 _ID_NAMESPACE = uuid.UUID("0f4c8a52-6d1e-4b7a-9e3f-2a5c7d9b1e60")
 
-# key -> (selection maps, change description)
-Proposals = dict[str, tuple[list[dict[str, Any]], str]]
+# selection name -> list of (new map, change description)
+Proposals = dict[str, list[tuple[dict[str, Any], str]]]
 
 
 def improve(rule: Rule, analysis: Analysis, events: Sequence[Event]) -> Improvement:
     """Build an improved rule from the analysis of ``rule`` on ``events``."""
-    detected = [i for i in range(len(events)) if i not in analysis.undetected_baselines]
     proposals: Proposals = {}
     unresolved: list[str] = []
     for finding in analysis.findings:
-        if _filter_suppressed(rule, analysis, finding):
+        variant = _variant_event(analysis, finding)
+        if match_selection(rule.selections[finding.condition], variant):
             unresolved.append(
                 f"{finding.mutation_name}: filter '{finding.condition}' suppresses the alert; "
                 "filters are not changed automatically, review it by hand"
             )
-        elif not _propose(finding, events, detected, proposals):
+        elif not _propose(rule, finding, events[finding.event_index], variant, proposals):
             unresolved.append(
                 f"{finding.mutation_name}: insufficient evidence, no unchanged field "
-                "shows the behaviour, so there is no safe value to match on"
+                f"can replace {finding.field} in '{finding.condition}'"
             )
     if not proposals:
         rationale = (
@@ -73,85 +73,86 @@ def improve(rule: Rule, analysis: Analysis, events: Sequence[Event]) -> Improvem
     return _build(rule, proposals, _unique(unresolved))
 
 
-def _filter_suppressed(rule: Rule, analysis: Analysis, finding: Finding) -> bool:
-    """True when the variant evaded because a filter selection now matches it."""
+def _variant_event(analysis: Analysis, finding: Finding) -> Event:
+    """The evading variant a finding is about."""
     for outcome in analysis.evaded:
         variant = outcome.result.variant
         if (
             outcome.event_index == finding.event_index
             and variant.mutation_name == finding.mutation_name
         ):
-            return match_selection(rule.selections[finding.condition], variant.event)
-    return False
+            return variant.event
+    raise ValueError(f"no evading variant for finding {finding}")  # pragma: no cover
 
 
 def _propose(
-    finding: Finding, events: Sequence[Event], detected: Sequence[int], proposals: Proposals
+    rule: Rule, finding: Finding, baseline: Event, variant: Event, proposals: Proposals
 ) -> bool:
-    """Add the selections that would catch this evasion; False when none applies."""
+    """Add replacements for the defeated field; False when none is safe."""
+    selection = rule.selections[finding.condition]
+    raw_maps = _raw_maps(rule, finding.condition)
     added = False
-    signals = finding.remaining_signals
-    if "OriginalFileName" in signals:
-        values = _field_values(events, detected, "OriginalFileName")
-        if values:
-            proposals.setdefault(
-                "original_file_name",
-                (
-                    [{"OriginalFileName": values}],
-                    f"OriginalFileName is {_listing(values)} (survives {finding.mutation_name})",
-                ),
-            )
-            added = True
-    if "CommandLine" in signals:
-        maps = []
-        for index in detected:
-            tokens = significant_arguments(events[index].get("CommandLine"))
-            if tokens:
-                maps.append({"CommandLine|contains|all": tokens})
-        if maps:
-            shown = " / ".join(_listing(m["CommandLine|contains|all"]) for m in maps)
-            proposals.setdefault(
-                "command_line",
-                (
-                    maps,
-                    f"CommandLine contains all of {shown} (survives {finding.mutation_name})",
-                ),
-            )
-            added = True
-    if finding.field == "Image" and finding.mutation_name == "change_path":
-        names = _image_names(events, detected)
-        if names:
-            values = [f"\\{escape_value(name)}" for name in names]
-            proposals.setdefault(
-                "image_name",
-                (
-                    [{"Image|endswith": values}],
-                    f"Image ends with {_listing(values)} (survives {finding.mutation_name})",
-                ),
-            )
+    for index, alternative in enumerate(selection.alternatives):
+        if not _uses(alternative, finding.field):
+            continue
+        if not match_selection(Selection(selection.name, (alternative,)), baseline):
+            continue
+        kept = {
+            key: value
+            for key, value in raw_maps[index].items()
+            if str(key).split("|")[0] != finding.field
+        }
+        for entries, description in _candidates(finding.field, baseline):
+            if set(entries) & set(kept):
+                continue
+            new_map = {**copy.deepcopy(kept), **entries}
+            candidate = parse_selection(finding.condition, new_map)
+            if not (match_selection(candidate, baseline) and match_selection(candidate, variant)):
+                continue
+            existing = proposals.setdefault(finding.condition, [])
+            if all(new_map != seen for seen, _ in existing):
+                existing.append(
+                    (
+                        new_map,
+                        f"{finding.field} replaced by {description} "
+                        f"(survives {finding.mutation_name})",
+                    )
+                )
             added = True
     return added
 
 
-def _image_names(events: Sequence[Event], detected: Sequence[int]) -> list[str]:
-    """File names of the executables of the detected baselines."""
-    names = []
-    for index in detected:
-        image = events[index].get("Image")
+def _candidates(field: str, baseline: Event) -> list[tuple[dict[str, Any], str]]:
+    """Possible replacements for ``field``, built only from the baseline's own values."""
+    found: list[tuple[dict[str, Any], str]] = []
+    tokens = significant_arguments(baseline.get("CommandLine"))
+    if field == "Image":
+        original = baseline.get("OriginalFileName")
+        if isinstance(original, str) and original:
+            value = escape_value(original)
+            found.append(({"OriginalFileName": value}, f"OriginalFileName '{value}'"))
+        image = baseline.get("Image")
         if isinstance(image, str) and basename(image):
-            names.append(basename(image))
-    return _unique(names)
+            value = "\\" + escape_value(basename(image))
+            found.append(({"Image|endswith": value}, f"Image ending with '{value}'"))
+    if field in ("Image", "CommandLine") and tokens:
+        found.append(
+            (
+                {"CommandLine|contains|all": tokens},
+                f"CommandLine containing all of {_listing(tokens)}",
+            )
+        )
+    return found
 
 
-def _field_values(events: Sequence[Event], detected: Sequence[int], field: str) -> list[str]:
-    """Escaped values of ``field`` from every detected baseline, or [] if one lacks it."""
-    values = []
-    for index in detected:
-        value = events[index].get(field)
-        if not isinstance(value, str) or not value:
-            return []
-        values.append(escape_value(value))
-    return _unique(values)
+def _uses(alternative: Sequence[FieldCondition], field: str) -> bool:
+    return any(condition.field == field for condition in alternative)
+
+
+def _raw_maps(rule: Rule, name: str) -> list[Mapping[Any, Any]]:
+    """The YAML maps of a selection, in the same order as its alternatives."""
+    value = rule.raw["detection"][name]
+    return [value] if isinstance(value, Mapping) else list(value)
 
 
 def significant_arguments(command_line: object) -> list[str]:
@@ -164,8 +165,8 @@ def significant_arguments(command_line: object) -> list[str]:
         return []
     tokens: list[str] = []
     for raw in split_args(command_line)[1:]:
-        token = raw.strip("\"'")
-        if not token or is_flag(token) or "\\" in token or "/" in token:
+        token = raw.strip("\"'").rstrip(",")
+        if not token or is_flag(token) or "\\" in token or "/" in token or " " in token:
             continue
         has_punctuation = any(not c.isalnum() for c in token)
         long_enough = len(token) >= MIN_PLAIN_TOKEN_LENGTH
@@ -186,60 +187,67 @@ def escape_value(value: str) -> str:
     return "".join(out)
 
 
-def filter_names(rule: Rule) -> tuple[str, ...]:
-    """Selections the condition uses under ``not`` (filters)."""
-    found: list[str] = []
+def render_condition(node: Node, replace: Mapping[str, str]) -> str:
+    """Write a condition back as text, OR-ing each replaced selection with its new one."""
+    if isinstance(node, Ref):
+        if node.name in replace:
+            return f"({node.name} or {replace[node.name]})"
+        return node.name
+    if isinstance(node, Of):
+        parts = [render_condition(Ref(name), replace) for name in node.names]
+        if len(parts) == 1:
+            return parts[0]
+        return "(" + (" and " if node.require_all else " or ").join(parts) + ")"
+    if isinstance(node, Not):
+        return f"not {_group(node.child, replace)}"
+    joiner = " and " if isinstance(node, And) else " or "
+    return joiner.join(_group(child, replace) for child in node.children)
 
-    def walk(node: Node, negated: bool) -> None:
-        if isinstance(node, Ref):
-            if negated:
-                found.append(node.name)
-        elif isinstance(node, Of):
-            if negated:
-                found.extend(node.names)
-        elif isinstance(node, Not):
-            walk(node.child, not negated)
-        else:
-            for child in node.children:
-                walk(child, negated)
 
-    walk(parse_condition(rule.condition, rule.selections), negated=False)
-    return tuple(_unique(found))
+def _group(node: Node, replace: Mapping[str, str]) -> str:
+    text = render_condition(node, replace)
+    return f"({text})" if isinstance(node, And | Or) else text
 
 
 def _build(rule: Rule, proposals: Proposals, unresolved: list[str]) -> Improvement:
     """Assemble, serialise and re-validate the improved rule."""
     raw = copy.deepcopy(dict(rule.raw))
-    detection = dict(raw.get("detection", {}))
-    detection.pop("condition", None)
-    names: list[str] = []
+    old_detection = dict(raw.get("detection", {}))
+    old_detection.pop("condition", None)
+    taken = dict(old_detection)
+    replace: dict[str, str] = {}
+    detection: dict[str, Any] = {}
     changes: list[str] = []
-    for key, (maps, change) in proposals.items():
-        name = _free_name(f"{PREFIX}{key}", detection)
-        detection[name] = maps[0] if len(maps) == 1 else maps
-        names.append(name)
-        changes.append(f"added '{name}': {change}")
-    added = " or ".join(names)
-    filters = filter_names(rule)
-    if filters:
-        guard = " and ".join(f"not {name}" for name in filters)
-        added = f"({added}) and {guard}"
-        changes.append(f"kept the filters on the new selections: {', '.join(filters)}")
-    new_condition = f"({rule.condition}) or ({added})"
+    for name, value in old_detection.items():
+        detection[name] = value
+        if name not in proposals:
+            continue
+        new_name = _free_name(f"{PREFIX}{name}", taken)
+        taken[new_name] = None
+        replace[name] = new_name
+        maps = [new_map for new_map, _ in proposals[name]]
+        detection[new_name] = maps[0] if len(maps) == 1 else maps
+        changes += [f"'{new_name}': {change}" for _, change in proposals[name]]
+    tree = parse_condition(rule.condition, rule.selections)
+    new_condition = render_condition(tree, replace)
+    if isinstance(tree, Ref):
+        new_condition = new_condition.removeprefix("(").removesuffix(")")
+    changes.append(f"condition '{rule.condition}' becomes '{new_condition}'")
     detection["condition"] = new_condition
     raw["detection"] = detection
     raw["title"] = f"{rule.title} (improved by YAGTHA)"
     raw["id"] = str(uuid.uuid5(_ID_NAMESPACE, f"{rule.id}|{new_condition}"))
     raw["description"] = (
-        f"Derived by YAGTHA from rule {rule.id}. Adds selections on evidence that stayed "
-        "the same in the variants that evaded the original rule."
+        f"Derived by YAGTHA from rule {rule.id}. Each defeated field can also be matched "
+        "by evidence that stayed the same in the variants that evaded the original rule."
     )
     raw["related"] = [{"id": rule.id, "type": "derived"}]
     yaml_text = yaml.safe_dump(raw, sort_keys=False, allow_unicode=True, width=100)
     new_rule = parse_rule(yaml_text)
     rationale = (
-        "The original rule depends on details the attacker controls. The new selections "
-        "match evidence that stayed the same in the evading variants."
+        "The original rule depends on details the attacker controls. Only the defeated "
+        "field is given an alternative, taken from evidence that stayed the same in the "
+        "evading variants; the rest of the rule is unchanged."
     )
     return Improvement(
         new_rule=new_rule,
@@ -250,7 +258,7 @@ def _build(rule: Rule, proposals: Proposals, unresolved: list[str]) -> Improveme
     )
 
 
-def _free_name(base: str, taken: dict[Any, Any]) -> str:
+def _free_name(base: str, taken: Mapping[Any, Any]) -> str:
     """``base``, or ``base_2``, ``base_3``... if a selection already uses it."""
     name, counter = base, 2
     while name in taken:

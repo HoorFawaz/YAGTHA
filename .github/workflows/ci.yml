@@ -31,6 +31,8 @@ jobs:
         run: mypy
       - name: Tests
         run: pytest --cov=yagtha --cov-report=term-missing
+      - name: Run every sample rule end to end
+        run: yagtha run --rule data/rules/
       - name: Security scan
         run: bandit -q -r src
       - name: Dependency audit

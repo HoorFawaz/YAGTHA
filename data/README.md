@@ -2,7 +2,9 @@
 
 Everything here is **synthetic**. No real malware, no real logs, no real users.
 
-- `rules/`: sample Sigma rules (Windows `process_creation`).
+- `rules/`: four sample Sigma rules (Windows `process_creation`): mimikatz, comsvcs.dll
+  MiniDump, PowerShell download cradle, whoami discovery. IP addresses use the
+  documentation range 198.51.100.0/24.
 - `malicious_events/`: baseline events each rule should catch, one JSON list per rule.
 - `benign_events/benign.json`: 14 synthetic normal-activity events (browsers, admin
   PowerShell, `certutil -hashfile`, notepad opening notes about mimikatz...) used to

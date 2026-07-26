@@ -94,8 +94,8 @@ def test_improve_text_output() -> None:
     code, text = run("improve", "--rule", str(RULE))
     assert code == EXIT_OK
     assert "Original rule: 1 of 4 variants evade it" in text
-    assert "added 'yagtha_original_file_name'" in text
-    assert "condition: (selection) or (yagtha_original_file_name or yagtha_command_line)" in text
+    assert "'yagtha_selection': Image replaced by OriginalFileName 'mimikatz.exe'" in text
+    assert "condition: selection or yagtha_selection" in text
     assert "variants evading: 1 -> 0" in text
     assert "fixed      event0/rename_image" in text
     assert "benign events matched: 0 -> 0 (of 14)" in text
@@ -110,7 +110,7 @@ def test_improve_json_output() -> None:
     assert data["verification"]["passed"] is True
     assert data["verification"]["fixed"] == ["event0/rename_image"]
     assert data["regression_cases"] == 19
-    assert "yagtha_command_line" in data["improved_rule"]["yaml"]
+    assert "sekurlsa::logonpasswords" in data["improved_rule"]["yaml"]
 
 
 def test_improve_without_evasion() -> None:
@@ -221,3 +221,24 @@ def test_run_refuses_output_outside_output_folder(
         assert code == EXIT_ERROR
         assert "must be inside output/" in capsys.readouterr().err
     assert not (tmp_path / "elsewhere").exists()
+
+
+def test_run_on_a_folder_of_rules(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    code, text = run("run", "--rule", str(DATA / "rules"))
+    assert code == EXIT_OK
+    assert "== mimikatz.yml" in text
+    assert text.rstrip().endswith("Rules: 4 | 4 PASSED")
+    assert bundle_files(tmp_path / "output") == [
+        "comsvcs_minidump",
+        "mimikatz",
+        "powershell_download_cradle",
+        "whoami_discovery",
+    ]
+
+
+def test_run_folder_errors(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    assert run("run", "--rule", str(tmp_path))[0] == EXIT_ERROR
+    events = str(DATA / "malicious_events" / "mimikatz.json")
+    assert run("run", "--rule", str(DATA / "rules"), "--events", events)[0] == EXIT_ERROR
