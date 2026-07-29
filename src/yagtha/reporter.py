@@ -57,8 +57,13 @@ def render_report(
     verification: Verification,
     cases: Sequence[RegressionCase],
     bundle_files: Sequence[str] = (),
+    ai_summary: str | None = None,
 ) -> str:
-    """Render the whole run as Markdown."""
+    """Render the whole run as Markdown.
+
+    ``ai_summary`` is an optional plain-language summary written by an LLM;
+    it is labelled as such and escaped like any untrusted text.
+    """
     before, after = verification.original, verification.improved
     rule = before.rule
     result = verdict(improvement, verification)
@@ -67,6 +72,15 @@ def render_report(
         "",
         f"**Verdict: {result.value}.** {VERDICT_TEXT[result]}",
         "",
+    ]
+    if ai_summary:
+        lines += [
+            "## In plain words (AI-generated, may contain mistakes)",
+            "",
+            f"> {_text(ai_summary)}",
+            "",
+        ]
+    lines += [
         "## Summary",
         "",
         "| | Original rule | Improved rule |",

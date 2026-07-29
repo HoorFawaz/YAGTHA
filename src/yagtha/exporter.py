@@ -18,7 +18,9 @@ can make YAGTHA write anywhere else.
 
 from __future__ import annotations
 
+import io
 import re
+import zipfile
 from collections.abc import Mapping
 from pathlib import Path
 
@@ -113,3 +115,24 @@ def _refuse_links(root: Path, bundle: Path) -> None:
         if current.is_symlink():
             raise ExportError(f"refusing to write through symbolic link {current}")
         current = current.parent
+
+
+def bundle_zip(name: str, files: Mapping[str, str]) -> bytes:
+    """The bundle as a zip archive in memory (used by the web UI; nothing touches disk).
+
+    Entries are ``<name>/<file>`` with the same checks as ``write_bundle`` and a
+    fixed timestamp, so the archive is deterministic.
+    """
+    if not re.fullmatch(r"[a-z0-9][a-z0-9_-]{0,63}", name):
+        raise ExportError(f"invalid bundle name '{name}'")
+    unknown = set(files) - set(BUNDLE_FILES)
+    if unknown:
+        raise ExportError(f"unknown bundle files: {', '.join(sorted(unknown))}")
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+        for file_name in BUNDLE_FILES:
+            if file_name in files:
+                info = zipfile.ZipInfo(f"{name}/{file_name}", date_time=(2026, 1, 1, 0, 0, 0))
+                info.compress_type = zipfile.ZIP_DEFLATED
+                archive.writestr(info, files[file_name].encode("utf-8"))
+    return buffer.getvalue()

@@ -27,12 +27,11 @@ from yagtha import __version__, exporter
 from yagtha.analyzer import analyze
 from yagtha.errors import YagthaError
 from yagtha.events import EventDict, load_events
-from yagtha.improver import improve
 from yagtha.models import Analysis, Improvement, RegressionCase, Rule, Verification
 from yagtha.mutations import list_mutations
-from yagtha.reporter import Verdict, render_report, verdict
+from yagtha.pipeline import RunResult, bundle_files, improvement_to_dict, run_rule
+from yagtha.reporter import Verdict
 from yagtha.rule_loader import load_rule, parse_rule, read_rule_text
-from yagtha.verifier import build_regression_cases, cases_to_dict, verify
 
 EXIT_OK = 0
 EXIT_FAILED = 1
@@ -74,6 +73,12 @@ def build_parser() -> argparse.ArgumentParser:
         type=Path,
         default=exporter.DEFAULT_ROOT,
         help="output folder, must be inside ./output (default: output/)",
+    )
+    run_cmd.add_argument(
+        "--explain",
+        action="store_true",
+        help="add a plain-language summary written by Claude to the report "
+        '(needs pip install -e ".[llm]" and ANTHROPIC_API_KEY)',
     )
 
     commands.add_parser("list-mutations", help="list the available mutations")
@@ -154,21 +159,15 @@ def _load_benign(args: argparse.Namespace) -> list[EventDict]:
     return load_events(benign_path)
 
 
-def _improve_and_verify(
-    args: argparse.Namespace, rule: Rule
-) -> tuple[Improvement, Verification, tuple[RegressionCase, ...]]:
+def _run(args: argparse.Namespace, rule: Rule, rule_text: str) -> RunResult:
     events = load_events(args.events or default_events_path(args.rule))
-    benign = _load_benign(args)
-    names = _mutation_names(args)
-    analysis = analyze(rule, events, names)
-    improvement = improve(rule, analysis, events)
-    verification = verify(rule, improvement.new_rule, events, benign, names)
-    cases = build_regression_cases(verification, benign) if improvement.changed else ()
-    return improvement, verification, cases
+    return run_rule(rule, rule_text, events, _load_benign(args), _mutation_names(args))
 
 
 def _run_improve(args: argparse.Namespace, stream: TextIO) -> None:
-    improvement, verification, cases = _improve_and_verify(args, load_rule(args.rule))
+    rule_text = read_rule_text(args.rule)
+    result = _run(args, parse_rule(rule_text), rule_text)
+    improvement, verification, cases = result.improvement, result.verification, result.cases
     if args.json:
         json.dump(improvement_to_dict(improvement, verification, cases), stream, indent=2)
         stream.write("\n")
@@ -207,24 +206,12 @@ def _run_pipeline(
     out = exporter.resolve_output_dir(args.out)
     rule_text = read_rule_text(args.rule)
     rule = parse_rule(rule_text)
-    improvement, verification, cases = _improve_and_verify(args, rule)
-    files = {
-        exporter.ORIGINAL_RULE: rule_text,
-        exporter.ANALYSIS: json.dumps(
-            improvement_to_dict(improvement, verification, cases), indent=2
-        )
-        + "\n",
-    }
-    if improvement.changed:
-        files[exporter.IMPROVED_RULE] = improvement.yaml_text
-        files[exporter.REGRESSION_CASES] = (
-            json.dumps(cases_to_dict(improvement.new_rule, cases), indent=2) + "\n"
-        )
-        files[exporter.REGRESSION_TEST] = exporter.REGRESSION_TEST_SOURCE
-    names = [name for name in exporter.BUNDLE_FILES if name in files or name == exporter.REPORT]
-    files[exporter.REPORT] = render_report(improvement, verification, cases, names)
+    run = _run(args, rule, rule_text)
+    improvement, verification = run.improvement, run.verification
+    files = bundle_files(run, _ai_summary(args, run))
+    names = list(files)
     bundle = exporter.write_bundle(out, exporter.bundle_name(args.rule), files)
-    result = verdict(improvement, verification)
+    result = run.verdict
     if verdicts is not None:
         verdicts.append(result.value)
     before, after = verification.original, verification.improved
@@ -245,6 +232,20 @@ def _run_pipeline(
     for name in names:
         stream.write(f"  {name}\n")
     return EXIT_FAILED if result is Verdict.FAILED else EXIT_OK
+
+
+def _ai_summary(args: argparse.Namespace, run: RunResult) -> str | None:
+    """Optional LLM summary for the report; a failure only prints a warning."""
+    if not args.explain:
+        return None
+    try:
+        from yagtha.llm.explain import explain
+        from yagtha.llm.provider import AnthropicProvider
+
+        return explain(AnthropicProvider(), run.improvement, run.verification)
+    except YagthaError as exc:
+        print(f"yagtha: warning: no AI summary: {exc}", file=sys.stderr)
+        return None
 
 
 def _display(path: Path) -> str:
@@ -298,36 +299,6 @@ def format_improvement(
     lines.append("")
     lines.append(f"Result: {'PASSED' if verification.passed else 'FAILED'}")
     return "\n".join(lines) + "\n"
-
-
-def improvement_to_dict(
-    improvement: Improvement, verification: Verification, cases: Sequence[RegressionCase]
-) -> dict[str, Any]:
-    """JSON-friendly view of an improvement and its verification."""
-    return {
-        "rule": {"id": verification.original.rule.id, "title": verification.original.rule.title},
-        "changed": improvement.changed,
-        "changes": list(improvement.changes),
-        "unresolved": list(improvement.unresolved),
-        "rationale": improvement.rationale,
-        "improved_rule": {
-            "id": improvement.new_rule.id,
-            "title": improvement.new_rule.title,
-            "yaml": improvement.yaml_text,
-        },
-        "verification": {
-            "passed": verification.passed,
-            "evaded_before": len(verification.original.evaded),
-            "evaded_after": len(verification.improved.evaded),
-            "fixed": list(verification.fixed),
-            "regressions": list(verification.regressions),
-            "benign_total": verification.benign_total,
-            "benign_hits_original": list(verification.benign_hits_original),
-            "benign_hits_improved": list(verification.benign_hits_improved),
-            "new_false_positives": list(verification.new_false_positives),
-        },
-        "regression_cases": len(cases),
-    }
 
 
 def _print_mutations(stream: TextIO) -> None:

@@ -26,6 +26,8 @@ dev = [
     "bandit>=1.8",
     "pip-audit>=2.7",
 ]
+llm = ["anthropic>=2.2,<3"]
+ui = ["streamlit>=1.65,<2"]
 
 [project.scripts]
 yagtha = "yagtha.cli:main"
@@ -52,3 +54,7 @@ select = ["E", "F", "W", "I", "B", "UP", "SIM", "RUF", "S", "N"]
 python_version = "3.11"
 strict = true
 files = ["src"]
+
+[[tool.mypy.overrides]]
+module = ["anthropic", "anthropic.*", "streamlit", "streamlit.*"]
+ignore_missing_imports = true
