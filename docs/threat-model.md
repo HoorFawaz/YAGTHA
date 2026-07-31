@@ -14,7 +14,7 @@ YAGTHA reads rules and logs written by other people. Both are treated as
 | Writing files outside the output folder (path traversal) | Exporter resolves paths, writes only inside `./output`, fixed file names, refuses symbolic links. |
 | Rule or event text changing the Markdown report | Values escaped; YAML shown in a fence longer than any backtick run. |
 | Code injection through generated tests | `test_regression.py` is static; cases are data in JSON, validated when loaded. |
-| LLM output used as data | Optional module; output validated against the event schema (Phase 7). |
+| LLM output used as data | Optional summary only: the answer must match a JSON schema, is length-limited and escaped, and never changes a rule, verdict or test. Only the computed results are sent (counts, findings with their explanations, proposed changes), not the event files. |
 | Secrets in the repository | None needed; any API key comes from an environment variable. |
 
 All sample rules and events are synthetic. YAGTHA never runs malware or a sandbox.
