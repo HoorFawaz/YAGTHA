@@ -161,14 +161,9 @@ to disk, and the bundle is offered as a zip download.
 ### Evasions, with the reason for each miss
 
 For the PowerShell download cradle, two variants evade the original rule. The rename is fixed; the
-encoded command is reported as not fixed because no evidence survived:
+encoded command is reported as not fixed because no evidence survived it:
 
-![Evasions tab for the PowerShell download cradle rule: encode_cmdline and rename_image evade the rule, encode_cmdline is not fixed](docs/images/evasions-powershell.png)
-
-For the whoami rule, a different parent process triggers the rule's own filter, so YAGTHA asks for
-a manual review instead of editing the filter:
-
-![Evasions tab for the whoami discovery rule: alt_parent is suppressed by filter_explorer and left for manual review](docs/images/evasions-whoami.png)
+![Evasions tab for the PowerShell download cradle rule: encode_cmdline and rename_image evade the rule, encode_cmdline is not fixed](docs/images/evasions.png)
 
 ### The improved rule
 
@@ -177,7 +172,8 @@ the original rule:
 
 ![Improved rule tab showing the YAML of the improved mimikatz rule](docs/images/improved-rule.png)
 
-The screenshots were taken from the running Streamlit app with the sample data in this repository.
+The screenshots were taken from the running Streamlit app (dark theme) with the sample data in
+this repository.
 
 ## Try it
 
